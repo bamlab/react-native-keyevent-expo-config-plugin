@@ -9,6 +9,9 @@
     "type": "git",
     "url": "https://github.com/bamlab/react-native-keyevent-expo-config-plugin.git"
   },
+  "publishConfig": {
+    "registry": "https://registry.npmjs.org"
+  },
   "scripts": {
     "build": "expo-module build",
     "clean": "expo-module clean",
