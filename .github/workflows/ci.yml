@@ -1,0 +1,89 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  unit:
+    name: Plugin mod tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        run: yarn install --frozen-lockfile
+
+      - name: Build the plugin
+        run: yarn build
+
+      - name: Run the plugin mod tests
+        run: yarn test:plugin
+
+  prebuild-android:
+    name: expo prebuild --platform android (current SDK)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        run: yarn install --frozen-lockfile
+
+      - name: Build the plugin
+        run: yarn build
+
+      - name: Pack the plugin
+        id: pack
+        run: echo "tarball=$(pwd)/$(npm pack | tail -n 1)" >> "$GITHUB_OUTPUT"
+
+      - name: Create a fresh Expo app on the current SDK
+        run: npx --yes create-expo-app@latest smoke-app --template blank --no-install
+
+      - name: Install the app dependencies and the packed plugin
+        working-directory: smoke-app
+        run: |
+          npm install
+          npm install react-native-keyevent
+          npm install "${{ steps.pack.outputs.tarball }}"
+
+      - name: Register the plugin in app.json
+        working-directory: smoke-app
+        run: |
+          node -e '
+            const fs = require("fs");
+            const app = JSON.parse(fs.readFileSync("app.json", "utf8"));
+            app.expo.android = { ...(app.expo.android || {}), package: "com.example.smokeapp" };
+            app.expo.plugins = [
+              ...(app.expo.plugins || []),
+              "@bam.tech/react-native-keyevent-expo-config-plugin",
+            ];
+            fs.writeFileSync("app.json", JSON.stringify(app, null, 2));
+          '
+          cat app.json
+          echo "Expo SDK under test: $(node -p "require('./package.json').dependencies.expo")"
+
+      - name: Prebuild Android
+        working-directory: smoke-app
+        run: npx expo prebuild --platform android --no-install
+
+      - name: Assert the generated blocks are present in MainActivity
+        working-directory: smoke-app
+        run: |
+          MAIN_ACTIVITY=$(find android/app/src/main -name 'MainActivity.*' | head -n 1)
+          echo "Checking $MAIN_ACTIVITY"
+          cat "$MAIN_ACTIVITY"
+          grep -q '@generated begin react-native-keyevent-import' "$MAIN_ACTIVITY"
+          grep -q '@generated begin react-native-keyevent-body' "$MAIN_ACTIVITY"
+          grep -q 'import com.github.kevinejohn.keyevent.KeyEventModule' "$MAIN_ACTIVITY"
+          grep -q 'KeyEventModule.getInstance().onKeyDownEvent(keyCode, event)' "$MAIN_ACTIVITY"
+          grep -q 'KeyEventModule.getInstance().onKeyUpEvent(keyCode, event)' "$MAIN_ACTIVITY"
